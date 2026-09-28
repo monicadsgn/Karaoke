@@ -16,6 +16,10 @@
     document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === 'screen-' + name));
     document.body.dataset.screen = name;
     if (name !== 'game' && state.game && state.game.running) state.game.stop();
+    // nada continua tocando ao trocar de tela (gravação, prévias de trecho/faixa)
+    if (name !== 'results') $('resAudio').pause();
+    if (state.game && !state.game.running) state.game.stems.stop();
+    if (state.preview) state.preview.stopAll();
     if (name === 'library') renderLibrary();
     window.scrollTo(0, 0);
   }
