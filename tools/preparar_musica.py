@@ -3,15 +3,19 @@
 
 Etapas:
   1. separa voz e instrumental (modelo UVR MDX-Net, via audio-separator)
-  2. extrai a melodia da voz (pYIN) e transforma em notas
-  3. divide a voz em trechos (frases) e chuta quem canta cada um (voz aguda x grave)
-  4. gera um arquivo único  <nome>.karaoke  (JSON com os áudios embutidos) para importar no app
+  2. extrai a melodia da voz (CREPE; pYIN se o torchcrepe não estiver instalado) e transforma em notas
+  3. divide a voz em trechos curtos e dá um primeiro chute de quem canta (voz aguda x grave).
+     O chute é só um ponto de partida: no app, a pessoa marca quem canta ouvindo a música.
+  4. transcreve a letra de cada trecho (Whisper via sherpa-onnx), se o modelo estiver disponível
+  5. gera um arquivo único  <nome>.karaoke  (JSON com os áudios embutidos) para importar no app
 
 Uso:
   python tools/preparar_musica.py musica.mp3 --titulo "Beauty and the Beast" --artista "Celine Dion & Peabo Bryson" \
       --cantores "Celine,Peabo" [--saida pasta/]
 
-Dependências: pip install "audio-separator[cpu]" librosa soundfile  (e ffmpeg no PATH)
+Dependências: pip install -r tools/requirements.txt  (e ffmpeg no PATH)
+Letra (opcional): baixe e descompacte em --modelos o modelo
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.en.tar.bz2
 """
 import argparse
 import base64
@@ -43,18 +47,47 @@ def separate(src, workdir, model_dir):
     return voc, inst
 
 
-def track_pitch(vocals_path):
+def track_pitch(vocals_path, method="auto", cache=None):
+    """Curva de altura (MIDI por quadro de 10 ms; NaN = sem voz).
+    CREPE erra bem menos a oitava que o pYIN em voz cantada (testado em dueto real)."""
     import librosa
 
     sr = 16000
     y, _ = librosa.load(vocals_path, sr=sr, mono=True)
     hop = int(sr * HOP)
-    f0, voiced, prob = librosa.pyin(
-        y, fmin=65, fmax=1100, sr=sr, frame_length=1024, hop_length=hop, fill_na=np.nan
-    )
-    rms = librosa.feature.rms(y=y, frame_length=1024, hop_length=hop)[0][: len(f0)]
-    midi = 69 + 12 * np.log2(f0 / 440.0)
+    rms = librosa.feature.rms(y=y, frame_length=1024, hop_length=hop)[0]
     loud = rms > max(0.01, np.percentile(rms, 60) * 0.25)
+
+    if method == "auto":
+        try:
+            import torchcrepe  # noqa: F401
+            method = "crepe"
+        except ImportError:
+            method = "pyin"
+
+    if cache and os.path.exists(cache):
+        z = np.load(cache)
+        f0, voiced = z["f0"], z["voiced"]
+    elif method == "crepe":
+        import torch
+        import torchcrepe
+
+        torch.set_num_threads(os.cpu_count() or 4)
+        f0, per = torchcrepe.predict(
+            torch.tensor(y[None, :]), sr, hop_length=hop, fmin=65, fmax=1100, model="full",
+            decoder=torchcrepe.decode.viterbi, return_periodicity=True, batch_size=1024, device="cpu",
+        )
+        f0, per = f0.numpy()[0], per.numpy()[0]
+        voiced = per > 0.5
+    else:
+        f0, voiced, _ = librosa.pyin(y, fmin=65, fmax=1100, sr=sr, frame_length=1024, hop_length=hop, fill_na=np.nan)
+    if cache and not os.path.exists(cache):
+        np.savez(cache, f0=f0, voiced=voiced)
+
+    n = min(len(f0), len(rms))
+    f0, voiced, rms, loud = f0[:n], voiced[:n], rms[:n], loud[:n]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        midi = 69 + 12 * np.log2(f0 / 440.0)
     ok = voiced & loud & np.isfinite(midi)
     midi = np.where(ok, midi, np.nan)
     return midi, rms, len(y) / sr
@@ -120,8 +153,28 @@ def segment_notes(midi, rms=None):
     return merged
 
 
+def split_long(a, b, active, max_len=6.0):
+    """Divide um trecho longo na maior pausa interna (os cantores costumam trocar nas pausas)."""
+    if (b - a) * HOP <= max_len:
+        return [(a, b)]
+    best, best_len, i = None, 0, a + 50
+    while i < b - 50:  # não corta a menos de 0,5 s das pontas
+        if not active[i]:
+            j = i
+            while j < b and not active[j]:
+                j += 1
+            if j - i > best_len:
+                best, best_len = (i, j), j - i
+            i = j
+        else:
+            i += 1
+    if not best or best_len < 5:
+        return [(a, b)]
+    return split_long(a, best[0], active, max_len) + split_long(best[1], b, active, max_len)
+
+
 def find_phrases(midi, rms, notes):
-    """Frases = trechos com voz separados por pausas >= 0.4 s."""
+    """Trechos = voz separada por pausas >= 0,25 s; trechos com mais de 6 s são divididos."""
     active = np.isfinite(midi)
     spans, i, n = [], 0, len(active)
     while i < n:
@@ -130,12 +183,12 @@ def find_phrases(midi, rms, notes):
             continue
         s = i
         gap = 0
-        while i < n and gap < 40:
+        while i < n and gap < 25:
             gap = 0 if active[i] else gap + 1
             i += 1
-        spans.append([s * HOP, (i - gap) * HOP])
+        spans.extend(split_long(s, i - gap, active))
     phrases = [
-        {"t0": round(a, 2), "t1": round(b, 2)} for a, b in spans if b - a >= 0.4
+        {"t0": round(a * HOP, 2), "t1": round(b * HOP, 2)} for a, b in spans if (b - a) * HOP >= 0.3
     ]
     # altura mediana de cada frase -> chute de cantor (2 grupos: agudo/grave)
     meds = []
@@ -200,6 +253,35 @@ def fix_octaves(notes, phrases):
     return notes, phrases
 
 
+def transcribe(vocals_path, phrases, model_dir):
+    """Letra de cada trecho com Whisper (sherpa-onnx). Sem o modelo, a letra fica vazia."""
+    d = os.path.join(model_dir, "sherpa-onnx-whisper-small.en")
+    try:
+        import sherpa_onnx
+        import librosa
+    except ImportError:
+        log("sherpa-onnx não instalado: sem letra automática")
+        return
+    if not os.path.isdir(d):
+        log("modelo Whisper não encontrado em", d, ": sem letra automática")
+        return
+    rec = sherpa_onnx.OfflineRecognizer.from_whisper(
+        encoder=os.path.join(d, "small.en-encoder.int8.onnx"),
+        decoder=os.path.join(d, "small.en-decoder.int8.onnx"),
+        tokens=os.path.join(d, "small.en-tokens.txt"),
+        num_threads=os.cpu_count() or 4,
+    )
+    y, sr = librosa.load(vocals_path, sr=16000, mono=True)
+    for p in phrases:
+        seg = y[max(0, int((p["t0"] - 0.15) * sr)): int((p["t1"] + 0.25) * sr)]
+        st = rec.create_stream()
+        st.accept_waveform(sr, seg)
+        rec.decode_stream(st)
+        text = st.result.text.strip()
+        # Whisper às vezes "inventa" em trechos só de vocalise
+        p["lyric"] = "" if text.startswith("[") or text.startswith("(") else text
+
+
 def contour(midi, step=0.02):
     k = int(step / HOP)
     out = []
@@ -228,18 +310,28 @@ def main():
     ap.add_argument("--cantores", default="Voz aguda,Voz grave", help='nomes "aguda,grave", ex.: "Celine,Peabo"')
     ap.add_argument("--saida", default=".")
     ap.add_argument("--modelos", default=os.path.expanduser("~/.cache/karaoke-models"))
+    ap.add_argument("--stems", nargs=2, metavar=("VOZ.wav", "INSTRUMENTAL.wav"), help="reaproveita uma separação já feita")
+    ap.add_argument("--cache-altura", help="arquivo .npz para guardar/reaproveitar a curva de altura")
+    ap.add_argument("--altura", choices=["auto", "crepe", "pyin"], default="auto")
     args = ap.parse_args()
 
     title = args.titulo or os.path.splitext(os.path.basename(args.audio))[0]
     work = tempfile.mkdtemp(prefix="karaoke-")
-    log("separando voz e instrumental (demora ~2x a duração da música)...")
-    voc, inst = separate(os.path.abspath(args.audio), work, args.modelos)
-    log("extraindo a melodia da voz...")
-    midi, rms, duration = track_pitch(voc)
+    if args.stems:
+        voc, inst = args.stems
+    else:
+        log("separando voz e instrumental (demora ~1-2x a duração da música)...")
+        voc, inst = separate(os.path.abspath(args.audio), work, args.modelos)
+    log("extraindo a melodia da voz (alguns minutos)...")
+    midi, rms, duration = track_pitch(voc, args.altura, args.cache_altura)
     midi = median_filter_nan(midi)
     notes = segment_notes(midi, rms)
     phrases = find_phrases(midi, rms, notes)
     notes, phrases = fix_octaves(notes, phrases)
+    for p in phrases:
+        p["guess"] = True  # quem canta ainda é um chute; o app pede para confirmar ouvindo
+    log("transcrevendo a letra...")
+    transcribe(voc, phrases, args.modelos)
     names = [s.strip() for s in args.cantores.split(",")] + ["Voz grave"]
     log(f"{len(notes)} notas, {len(phrases)} trechos, "
         f"{sum(p['who'] == 'A' for p in phrases)} de {names[0]} / {sum(p['who'] == 'B' for p in phrases)} de {names[1]}")

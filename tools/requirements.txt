@@ -1,3 +1,5 @@
 audio-separator[cpu]
 librosa
 soundfile
+torchcrepe
+sherpa-onnx

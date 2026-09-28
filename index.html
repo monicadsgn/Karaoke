@@ -124,8 +124,12 @@
 
     <section class="card" id="phraseCard" hidden>
       <h3>Quem canta cada trecho</h3>
-      <p class="muted small">O app separou a voz em trechos e tentou adivinhar quem canta cada um pela altura (voz aguda × grave).
-        Confira ouvindo (▶) e corrija se precisar. "Juntos" = os dois cantam ao mesmo tempo.</p>
+      <div class="notice" id="tagNotice">
+        <p><b>O app ainda está chutando quem canta cada trecho.</b> Ouça a música uma vez e toque no nome de quem está
+          cantando sempre que a voz mudar: leva o tempo da música e deixa tudo certinho.</p>
+        <button class="btn primary" id="tagOpen">🎧 Marcar ouvindo</button>
+      </div>
+      <p class="muted small">Também dá pra corrigir um trecho específico: ouça no ▶ e troque na lista. "Juntos" = os dois cantam ao mesmo tempo.</p>
       <div class="row wrap">
         <label for="singerA">Voz aguda</label><input id="singerA" class="short">
         <label for="singerB">Voz grave</label><input id="singerB" class="short">
@@ -157,8 +161,8 @@
         <label for="micDevice">Entrada</label>
         <select id="micDevice"><option value="">Microfone padrão</option></select>
       </div>
-      <label class="check"><input type="checkbox" id="headphones" checked>
-        O microfone só capta a minha voz <span class="muted small">(fone de ouvido, ou microfone ligado direto no computador. Se o microfone também escuta a caixa de som, desmarque)</span></label>
+      <label class="check"><input type="checkbox" id="echoCancel">
+        Anti-eco <span class="muted small">(deixe desligado. Só ligue se o app confundir a sua voz com a música — no celular ele pode deixar o som com qualidade de ligação)</span></label>
       <div class="row">
         <label for="latency">Atraso total</label>
         <input type="range" id="latency" min="0" max="0.6" step="0.01" value="0.08">
@@ -265,6 +269,24 @@
         <button value="ok" class="btn primary" id="midiOk">Importar</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- ============ MARCAR QUEM CANTA ============ -->
+  <dialog id="tagDialog" class="tag-dialog">
+    <h2>Quem está cantando agora?</h2>
+    <p class="muted small">Toque no nome sempre que a voz mudar. Não precisa ser no segundo exato: o app ajusta pro começo do trecho.
+      No teclado: 1, 2 e 3.</p>
+    <div class="tag-now"><span id="tagTime" class="time">0:00</span><span id="tagLyric"></span></div>
+    <div class="tag-buttons">
+      <button type="button" class="tag" data-tag="A" id="tagA">A</button>
+      <button type="button" class="tag" data-tag="B" id="tagB">B</button>
+      <button type="button" class="tag" data-tag="AB">Os dois</button>
+    </div>
+    <div class="progress"><div id="tagProg"></div></div>
+    <div class="actions center">
+      <button type="button" class="btn" id="tagBack">⟲ voltar 10 s</button>
+      <button type="button" class="btn primary" id="tagDone">Concluir</button>
+    </div>
   </dialog>
 
   <div id="toast" class="toast"></div>

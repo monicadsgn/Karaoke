@@ -54,7 +54,7 @@
 
   async function ensureMic() {
     const ctx = await ensureAudio();
-    const headphones = $('headphones').checked;
+    const headphones = !$('echoCancel').checked; // anti-eco desligado = som normal (sem "modo ligação")
     const deviceId = $('micDevice').value;
     if (state.mic && state.mic.headphones === headphones && state.mic.deviceId === deviceId) return state.mic;
     if (state.mic) state.mic.stop();
@@ -270,7 +270,7 @@
     const s = (state.settings = { ...DEFAULTS, latency: g.latency ?? 0.08, ...K.Store.prefs(id) });
     if (!s.partner) s.partner = song.voices.length > 1 ? 'voice:' + (s.myVoice === 0 ? 1 : 0) : 'third_above';
     if (s.myVoice >= song.voices.length) s.myVoice = 0;
-    $('headphones').checked = g.headphones ?? true;
+    $('echoCancel').checked = g.echoCancel ?? false;
     const stems = song.type === 'stems';
     $('partnerBlock').hidden = stems;
     $('audioBlock').hidden = stems;
@@ -375,7 +375,7 @@
     K.Store.saveGlobalPrefs({ latency: state.settings.latency });
     saveSettings();
   };
-  $('headphones').onchange = (e) => K.Store.saveGlobalPrefs({ headphones: e.target.checked });
+  $('echoCancel').onchange = (e) => K.Store.saveGlobalPrefs({ echoCancel: e.target.checked });
 
   $('audioFile').addEventListener('change', async (e) => {
     const f = e.target.files[0];
@@ -416,10 +416,11 @@
     $('singerB').value = song.singers.B;
     $('jointMode').value = state.settings.jointMode || 'play';
     const opt = (v, l, cur) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+    $('tagNotice').hidden = !song.phrases.some((p) => p.guess);
     $('phraseList').innerHTML = song.phrases.map((p, i) => `
       <div class="phrase" data-i="${i}" data-who="${p.who}">
         <button class="btn small" data-play="${i}" title="Ouvir">▶</button>
-        <span class="time">${fmtTime(p.t0)}</span>
+        <span class="time">${fmtTime(p.t0)}${p.guess ? '<br><span class="guess" title="chute do app">chute</span>' : ''}</span>
         <select data-who-sel="${i}">
           ${opt('A', song.singers.A, p.who)}${opt('B', song.singers.B, p.who)}${opt('AB', 'Juntos', p.who)}${opt('-', 'Ignorar', p.who)}
         </select>
@@ -441,8 +442,10 @@
     const inp = e.target.closest('[data-lyric]');
     if (sel) {
       const i = +sel.dataset.whoSel;
-      updateStoredSong((song) => { song.phrases[i].who = sel.value; });
+      updateStoredSong((song) => { song.phrases[i].who = sel.value; song.phrases[i].guess = false; });
       sel.closest('.phrase').dataset.who = sel.value;
+      const g = sel.closest('.phrase').querySelector('.guess');
+      if (g) g.remove();
       syncSetupForm();
     } else if (inp) {
       updateStoredSong((song) => { song.phrases[+inp.dataset.lyric].lyric = inp.value; });
@@ -495,6 +498,103 @@
       busy(null);
     }
   }
+
+  // ---------------- marcar quem canta ouvindo ----------------
+  // Toca a gravação original; a pessoa toca no nome de quem está cantando quando a voz muda.
+  // Cada trecho recebe o cantor marcado no meio dele (descontando o tempo de reação).
+  const REACTION = 0.35;
+  const tag = { events: [], raf: 0 };
+
+  function tagLabelAt(t) {
+    let who = null;
+    for (const e of tag.events) { if (e.t <= t) who = e.who; else break; }
+    return who;
+  }
+
+  function tagPlayFrom(t) {
+    const g = state.game;
+    tag.start = Math.max(0, t);
+    tag.startCtx = state.ctx.currentTime + 0.05;
+    g.stems.preview(tag.start, state.song.duration || 1e4);
+  }
+
+  function tagNow() { return tag.start + (state.ctx.currentTime - tag.startCtx); }
+
+  function tagApply(upTo) {
+    updateStoredSong((song) => {
+      for (const p of song.phrases) {
+        if (p.t1 > upTo + 0.3 || p.t1 < tag.from) continue;
+        const who = tagLabelAt((p.t0 + p.t1) / 2);
+        if (who) { p.who = who; p.guess = false; }
+      }
+    });
+  }
+
+  function tagSet(who) {
+    const t = Math.max(tag.from, tagNow() - REACTION);
+    tag.events = tag.events.filter((e) => e.t < t);
+    tag.events.push({ t, who });
+    document.querySelectorAll('.tag').forEach((b) => b.classList.toggle('on', b.dataset.tag === who));
+  }
+
+  function tagTick() {
+    const t = tagNow();
+    const song = state.song;
+    $('tagTime').textContent = fmtTime(t) + ' / ' + fmtTime(song.duration || 0);
+    $('tagProg').style.width = Math.min(100, (t / (song.duration || 1)) * 100) + '%';
+    const p = song.phrases.find((x) => t >= x.t0 - 0.3 && t <= x.t1 + 0.3);
+    $('tagLyric').textContent = p ? (p.lyric || '♪') : '(instrumental)';
+    if (song.duration && t > song.duration) return tagFinish();
+    tag.raf = requestAnimationFrame(tagTick);
+  }
+
+  async function tagOpen() {
+    await ensureAudio();
+    const g = ensureGame();
+    try { await loadStems(g); } catch (e) { return; }
+    const song = state.song;
+    $('tagA').textContent = song.singers.A;
+    $('tagB').textContent = song.singers.B;
+    document.querySelectorAll('.tag').forEach((b) => b.classList.remove('on'));
+    tag.events = [];
+    tag.from = 0;
+    $('tagDialog').showModal();
+    tagPlayFrom(0);
+    tag.raf = requestAnimationFrame(tagTick);
+  }
+
+  function tagFinish() {
+    if (!$('tagDialog').open) return;
+    cancelAnimationFrame(tag.raf);
+    const upTo = tagNow();
+    state.game.stems.stop();
+    if (tag.events.length) tagApply(upTo);
+    $('tagDialog').close();
+    renderPhrases();
+    syncSetupForm();
+    const left = storedSong().phrases.filter((p) => p.guess).length;
+    toast(left ? `Marcado até ${fmtTime(upTo)}. Faltam ${left} trechos: abra de novo pra continuar.` : 'Pronto! Todos os trechos marcados.', 5000);
+  }
+
+  $('tagOpen').onclick = tagOpen;
+  $('tagDone').onclick = tagFinish;
+  $('tagDialog').addEventListener('cancel', (e) => { e.preventDefault(); tagFinish(); });
+  document.querySelector('.tag-buttons').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tag]');
+    if (b) tagSet(b.dataset.tag);
+  });
+  $('tagBack').onclick = () => {
+    const t = Math.max(0, tagNow() - 10);
+    tag.events = tag.events.filter((e) => e.t < t);
+    const cur = tagLabelAt(t);
+    document.querySelectorAll('.tag').forEach((b) => b.classList.toggle('on', b.dataset.tag === cur));
+    tagPlayFrom(t);
+  };
+  document.addEventListener('keydown', (e) => {
+    if (!$('tagDialog').open) return;
+    const map = { Digit1: 'A', Digit2: 'B', Digit3: 'AB', Numpad1: 'A', Numpad2: 'B', Numpad3: 'AB' };
+    if (map[e.code]) { e.preventDefault(); tagSet(map[e.code]); }
+  });
 
   // ---------------- calibração de atraso ----------------
   $('calibrate').onclick = async () => {

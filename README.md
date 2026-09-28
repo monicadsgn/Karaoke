@@ -21,7 +21,7 @@ Depois abra `http://localhost:8080` no Chrome, Edge ou Firefox e permita o micro
 O app precisa **ouvir a sua voz** para saber se você está no tom. Na tela da música:
 
 - **Entrada**: escolha qual microfone o app usa.
-- **"O microfone só capta a minha voz"**: deixe marcado se o microfone vai direto no computador (ou se você usa fone).
+- **Anti-eco**: deixe desligado. No celular ele coloca o som em "modo ligação"; só ligue se o app confundir sua voz com a música.
 - **Calibrar atraso**: caixas Bluetooth atrasam o som. Toque em "Calibrar", diga "tá" junto com os 8 bipes e o app
   mede o atraso total (caixa + microfone) sozinho.
 
@@ -38,8 +38,9 @@ Para cantar com a gravação original — por exemplo, você faz a parte da cant
 
    Isso gera um arquivo `Nome.karaoke` (demora ~2× a duração da música). O Claude também pode preparar para você.
 2. No app, **Importar música preparada (.karaoke)**.
-3. Confira **quem canta cada trecho** (o app chuta pela altura: voz aguda × grave), ouça com ▶ e corrija se precisar.
-   Cole a letra (uma linha por trecho).
+3. Marque **quem canta cada trecho**: toque em **🎧 Marcar ouvindo** e, ouvindo a música uma vez, toque no nome de
+   quem está cantando sempre que a voz mudar. (O app só dá um chute inicial pela altura da voz.)
+   A letra vem transcrita automaticamente da gravação; dá pra corrigir cada trecho na lista.
 4. Escolha a sua voz: nos seus trechos a voz original some (ou fica baixinha como guia); nos do outro cantor, ela toca.
 
 ## Treino por etapas e gravação

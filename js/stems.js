@@ -190,7 +190,8 @@
       const mk = (buf, g) => { const s = ctx.createBufferSource(); s.buffer = buf; s.connect(g); return s; };
       const a = mk(this.raw.inst, this.out), b = mk(this.raw.voc, this.out);
       const now = ctx.currentTime + 0.05;
-      a.start(now, t0, t1 - t0); b.start(now, t0, t1 - t0);
+      const dur = Math.max(0.1, Math.min(t1, this.raw.inst.duration) - t0);
+      a.start(now, t0, dur); b.start(now, t0, dur);
       this.sources = [a, b];
     }
   }

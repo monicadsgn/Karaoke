@@ -259,3 +259,23 @@ textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 10px; b
 .rec { margin: 16px 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .rec audio { width: 100%; max-width: 480px; }
 .busy { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; z-index: 30; font-weight: 700; font-size: 1.2rem; }
+
+/* marcar quem canta */
+.notice { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; margin: 8px 0 12px; }
+.notice p { margin: 0 0 10px; }
+.phrase .guess { font-size: .75rem; color: var(--muted); }
+.tag-dialog { max-width: 560px; text-align: center; }
+.tag-now { display: flex; flex-direction: column; gap: 4px; min-height: 4.5em; justify-content: center; margin: 12px 0; }
+.tag-now .time { font-variant-numeric: tabular-nums; color: var(--muted); }
+#tagLyric { font-size: 1.15rem; font-weight: 600; }
+.tag-buttons { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 12px 0; }
+.tag { font: inherit; font-weight: 800; font-size: 1.15rem; padding: 26px 8px; border-radius: 18px; border: 3px solid var(--border);
+  background: var(--surface); color: var(--text); cursor: pointer; transition: transform .08s; }
+.tag:active { transform: scale(.96); }
+.tag[data-tag=A] { border-color: var(--mine); }
+.tag[data-tag=B] { border-color: var(--accent-2); }
+.tag[data-tag=AB] { border-color: var(--voice); }
+.tag.on[data-tag=A] { background: var(--mine); color: #fff; }
+.tag.on[data-tag=B] { background: var(--accent-2); color: #fff; }
+.tag.on[data-tag=AB] { background: var(--voice); color: #222; }
+@media (max-width: 600px) { .tag-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; } .tag { padding: 40px 6px; } }
