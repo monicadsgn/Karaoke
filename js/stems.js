@@ -11,8 +11,11 @@
   }
 
   function parseKaraokeFile(text) {
-    const data = JSON.parse(text);
-    if (!data || data.type !== 'stems' || !data.audio) throw new Error('Arquivo .karaoke inválido.');
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { /* não é JSON */ }
+    if (!data || data.type !== 'stems' || !data.audio) {
+      throw new Error('esse arquivo não é uma música preparada (.karaoke). Escolha o arquivo que o Claude te mandou.');
+    }
     const mime = data.audio.mime || 'audio/mpeg';
     const blobs = {
       inst: b64ToBlob(data.audio.instrumental, mime),
