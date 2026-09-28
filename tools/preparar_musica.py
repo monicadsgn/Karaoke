@@ -164,6 +164,42 @@ def find_phrases(midi, rms, notes):
     return phrases
 
 
+def fix_octaves(notes, phrases):
+    """Corrige erros de oitava da leitura: cada cantor tem uma região típica;
+    trechos e notas muito fora dela são puxados uma oitava pra cima/baixo."""
+    def phrase_of(n):
+        mid = n["t"] + n["d"] / 2
+        for i, p in enumerate(phrases):
+            if p["t0"] - 0.2 <= mid <= p["t1"] + 0.2:
+                return i
+        return None
+
+    groups = {}
+    for n in notes:
+        i = phrase_of(n)
+        if i is not None:
+            groups.setdefault(i, []).append(n)
+    for who in ("A", "B"):
+        meds = [np.median([n["midi"] for n in groups[i]]) for i, p in enumerate(phrases) if p["who"] == who and i in groups]
+        if not meds:
+            continue
+        center = float(np.median(meds))
+        for i, p in enumerate(phrases):
+            if p["who"] != who or i not in groups:
+                continue
+            ns = groups[i]
+            med = float(np.median([n["midi"] for n in ns]))
+            shift = 12 * round((center - med) / 12) if abs(center - med) > 7 else 0
+            for n in ns:
+                n["midi"] += shift
+            med += shift
+            for n in ns:  # notas soltas fora do trecho
+                if abs(n["midi"] - med) > 9:
+                    n["midi"] += 12 * round((med - n["midi"]) / 12)
+            p["pitch"] = round(float(np.median([n["midi"] for n in ns])), 1)
+    return notes, phrases
+
+
 def contour(midi, step=0.02):
     k = int(step / HOP)
     out = []
@@ -203,6 +239,7 @@ def main():
     midi = median_filter_nan(midi)
     notes = segment_notes(midi, rms)
     phrases = find_phrases(midi, rms, notes)
+    notes, phrases = fix_octaves(notes, phrases)
     names = [s.strip() for s in args.cantores.split(",")] + ["Voz grave"]
     log(f"{len(notes)} notas, {len(phrases)} trechos, "
         f"{sum(p['who'] == 'A' for p in phrases)} de {names[0]} / {sum(p['who'] == 'B' for p in phrases)} de {names[1]}")

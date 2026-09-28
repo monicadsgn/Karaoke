@@ -596,7 +596,7 @@
         const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
         const syl = (l) => {
           if (!l) return '';
-          if (this.stemMode) return `<span class="wipe">${esc(l.text) || '♪ sua vez ♪'}</span>`;
+          if (this.stemMode) return `<span class="wipe">${esc(l.text) || '♪ ♪ ♪'}</span>`;
           return l.notes.map((n) => `<span>${esc(n.lyric)}</span>`).join('');
         };
         let partnerTxt = pcur && pcur.start - tt < 4 ? esc(pcur.text || (this.stemMode ? '…' : '')) : '';
