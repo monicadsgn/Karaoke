@@ -94,6 +94,8 @@
           <label><input type="radio" name="diff" value="45" checked> Médio</label>
           <label><input type="radio" name="diff" value="25"> Difícil</label>
         </div>
+        <label class="check"><input type="checkbox" id="startNote" checked>
+          Tocar minha primeira nota antes de começar</label>
         <label class="check"><input type="checkbox" id="octaveFree" checked>
           Aceitar qualquer oitava <span class="muted small">(para cantar parte masculina com voz feminina e vice-versa)</span></label>
 
@@ -193,6 +195,7 @@
         <div class="cents" id="hudCents"></div>
       </div>
       <div class="hud-right">
+        <button class="btn small" id="noteBtn" title="Ouvir minha próxima nota (tecla N)">🎵 Nota</button>
         <button class="btn small" id="pauseBtn">Pausar</button>
         <button class="btn small" id="quitBtn">Sair</button>
       </div>

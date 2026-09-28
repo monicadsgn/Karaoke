@@ -316,6 +316,7 @@
     $('rateOut').textContent = Math.round(s.rate * 100) + '%';
     document.querySelectorAll('input[name=diff]').forEach((r) => { r.checked = +r.value === s.tolerance; });
     $('octaveFree').checked = s.octaveFree;
+    $('startNote').checked = s.startNote !== false;
     for (const k of ['partnerVol', 'guideVol', 'accompVol', 'audioVol']) $(k).value = s[k];
     $('accompRow').hidden = !(song.accomp && song.accomp.length);
     const hasAudio = !!state.audioBlob;
@@ -355,6 +356,7 @@
   $('rate').oninput = (e) => { state.settings.rate = +e.target.value; $('rateOut').textContent = Math.round(state.settings.rate * 100) + '%'; saveSettings(); };
   $('difficulty').addEventListener('change', (e) => { state.settings.tolerance = +e.target.value; saveSettings(); });
   $('octaveFree').onchange = (e) => { state.settings.octaveFree = e.target.checked; saveSettings(); };
+  $('startNote').onchange = (e) => { state.settings.startNote = e.target.checked; saveSettings(); };
   for (const k of ['partnerVol', 'guideVol', 'accompVol', 'audioVol']) {
     $(k).oninput = (e) => { state.settings[k] = +e.target.value; saveSettings(); };
   }
@@ -580,6 +582,10 @@
 
   $('stagePrev').onclick = () => state.game.changeStage(-1);
   $('stageNext').onclick = () => state.game.changeStage(1);
+  $('noteBtn').onclick = () => {
+    const n = state.game.playNextNote();
+    if (n) toast('🎵 ' + K.noteName(n.midi), 1200);
+  };
   $('pauseBtn').onclick = () => { const p = state.game.togglePause(); $('pauseBtn').textContent = p ? 'Continuar' : 'Pausar'; };
   $('quitBtn').onclick = () => {
     const g = state.game;
@@ -589,6 +595,7 @@
     if (document.body.dataset.screen !== 'game') return;
     if (e.code === 'Space') { e.preventDefault(); $('pauseBtn').click(); }
     if (e.code === 'Escape') $('quitBtn').click();
+    if (e.code === 'KeyN') $('noteBtn').click();
   });
 
   // ---------------- resultado ----------------

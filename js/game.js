@@ -176,7 +176,7 @@
       this._applyStage();
       this.recording = null;
       if (!this.practice && this.s.record !== false) this._startRecording();
-      this._seekTo(this.startSong);
+      this._seekTo(this.startSong, true);
       this.running = true;
       this.paused = false;
       this.lastFrame = performance.now();
@@ -194,13 +194,34 @@
       this.trail = [];
     }
 
-    _seekTo(t) {
-      this.anchorCtx = this.ctx.currentTime + 0.08;
+    // cue = true: antes de começar, um silêncio curto com a sua primeira nota tocando
+    _seekTo(t, cue = false) {
+      const CUE = 2.2;
+      const note = cue && this.s.startNote !== false ? this._firstNoteFrom(this.range.from) : null;
+      this.anchorCtx = this.ctx.currentTime + 0.08 + (note ? CUE : 0);
+      if (note) {
+        this.cue = { note, until: this.anchorCtx };
+        this.sched.playNote('cue', note.midi, this.ctx.currentTime + 0.1, 1.5);
+      } else {
+        this.cue = null;
+      }
       this.anchorSong = t;
       this.sched.seek(t);
       this.noteIdx = 0;
       if (this.audio) { this.audio.pause(); this.audioStarted = false; }
       if (this.stemMode) this.stems.play(t, this.anchorCtx, this.song.phrases, this.s.myKey, this.s.jointMode);
+    }
+
+    _firstNoteFrom(t) {
+      return this.data.mine.find((n) => !n.free && n.t >= t - 0.01) || null;
+    }
+
+    // toca de novo a sua próxima nota (botão 🎵 / tecla N)
+    playNextNote() {
+      const t = this.songTime();
+      const n = this.currentNote || this._firstNoteFrom(t);
+      if (n) this.sched.playNote('cue', n.midi, this.ctx.currentTime + 0.02, 1.2);
+      return n;
     }
 
     _applyStage() {
@@ -237,7 +258,7 @@
         this._applyStage();
       }
       this.resetScore();
-      this._seekTo(Math.max(this.range.from - 2, -1));
+      this._seekTo(Math.max(this.range.from - 2, -1), true);
     }
 
     _stageMsg(text) {
@@ -559,9 +580,22 @@
         g.fill();
       }
 
+      // nota de partida
+      if (this.cue && this.ctx.currentTime < this.cue.until && !this.paused) {
+        g.fillStyle = col('--overlay');
+        g.fillRect(0, 0, w, h);
+        g.textAlign = 'center';
+        g.fillStyle = col('--muted');
+        g.font = '600 18px system-ui, sans-serif';
+        g.fillText('🎵 Sua primeira nota', w / 2, h / 2 - 34);
+        g.fillStyle = col('--mine');
+        g.font = 'bold 54px system-ui, sans-serif';
+        g.fillText(K.noteName(this.cue.note.midi), w / 2, h / 2 + 26);
+        g.textAlign = 'left';
+      }
       // contagem regressiva
       const firstNote = this.scored[0];
-      if (firstNote && t < firstNote.t && firstNote.t - t < 3.2 * this.s.rate && !this.paused) {
+      if (!(this.cue && this.ctx.currentTime < this.cue.until) && firstNote && t < firstNote.t && firstNote.t - t < 3.2 * this.s.rate && !this.paused) {
         const left = Math.ceil((firstNote.t - t) / this.s.rate);
         g.fillStyle = col('--muted');
         g.font = 'bold 42px system-ui, sans-serif';

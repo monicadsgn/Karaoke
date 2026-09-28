@@ -5,6 +5,8 @@
     // "voz": triângulo + seno uma oitava acima, com vibrato suave
     partner: { waves: [['triangle', 1, 0.8], ['sine', 2, 0.18]], attack: 0.04, release: 0.1, vibrato: 14, gain: 0.35 },
     guide: { waves: [['sine', 1, 1]], attack: 0.03, release: 0.08, vibrato: 0, gain: 0.22 },
+    // nota de partida: timbre de "diapasão/piano" bem claro
+    cue: { waves: [['triangle', 1, 0.8], ['sine', 2, 0.25], ['sine', 3, 0.08]], attack: 0.01, release: 0.4, decay: 1.6, vibrato: 0, gain: 0.5 },
     accomp: { waves: [['triangle', 1, 0.7], ['sine', 2, 0.2]], attack: 0.01, release: 0.25, decay: 0.8, vibrato: 0, gain: 0.07 },
   };
 
