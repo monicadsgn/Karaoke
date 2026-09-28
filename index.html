@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Karaokê de Harmonia</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="brand" data-go="library" title="Início">🎤 <span>Karaokê de Harmonia</span></button>
+    <div class="mic-pill" id="micPill" title="Microfone">
+      <span class="dot"></span><span id="micPillText">mic desligado</span>
+    </div>
+  </header>
+
+  <!-- ============ BIBLIOTECA ============ -->
+  <main id="screen-library" class="screen active">
+    <section class="hero">
+      <h1>Treine a sua harmonia</h1>
+      <p>Escolha uma música, decida se você é a <b>primeira</b> ou a <b>segunda voz</b> e o app canta a outra parte com você.
+        A linha colorida mostra onde está a sua voz — o objetivo é ficar em cima das suas notas.</p>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Músicas</h2>
+        <div class="actions">
+          <label class="btn">Importar UltraStar (.txt)
+            <input type="file" id="importUltrastar" accept=".txt,text/plain" hidden>
+          </label>
+          <label class="btn">Importar MIDI / KAR
+            <input type="file" id="importMidi" accept=".mid,.midi,.kar,audio/midi" hidden>
+          </label>
+        </div>
+      </div>
+      <div id="songList" class="song-list"></div>
+    </section>
+
+    <details class="help">
+      <summary>Como colocar as músicas que eu gosto?</summary>
+      <ul>
+        <li><b>UltraStar (.txt)</b> — o formato de karaokê "estilo SingStar". Existem arquivos feitos pela comunidade para muitas músicas,
+          inclusive <b>duetos</b> (arquivos com <code>P1</code> e <code>P2</code>) — perfeitos pra harmonia. Importe o .txt e, se quiser, adicione o MP3 instrumental ou original na tela da música.</li>
+        <li><b>MIDI / KAR</b> — arquivos de karaokê MIDI. Você escolhe qual faixa é a primeira voz e qual é a segunda; as outras viram acompanhamento. Letra de .kar é importada automaticamente.</li>
+        <li><b>Música com uma voz só?</b> O app cria uma segunda voz automática (terça acima, terça abaixo, sexta ou quinta) a partir da tonalidade da música.</li>
+      </ul>
+    </details>
+  </main>
+
+  <!-- ============ CONFIGURAÇÃO DA MÚSICA ============ -->
+  <main id="screen-setup" class="screen">
+    <button class="link" data-go="library">← Músicas</button>
+    <h1 id="setupTitle"></h1>
+    <p class="muted" id="setupArtist"></p>
+
+    <div class="grid2">
+      <section class="card">
+        <h3>1. Qual voz você canta?</h3>
+        <div id="voiceChoice" class="choices"></div>
+        <p class="muted small" id="rangeInfo"></p>
+
+        <h3>2. Quem canta com você?</h3>
+        <select id="partnerSelect"></select>
+        <p class="muted small">Dica: cante uma vez com a voz da música, depois troque de lado para treinar a outra parte.</p>
+
+        <h3>3. Tom e velocidade</h3>
+        <div class="row">
+          <label>Tom</label>
+          <div class="stepper">
+            <button id="trDown">−</button><output id="trOut">0</output><button id="trUp">+</button>
+          </div>
+          <span class="muted small">semitons</span>
+        </div>
+        <div class="row">
+          <label for="rate">Velocidade</label>
+          <input type="range" id="rate" min="0.5" max="1.25" step="0.05" value="1">
+          <output id="rateOut">100%</output>
+        </div>
+        <p class="muted small" id="audioTransposeWarn" hidden>Com instrumental carregado, o tom só muda as notas do jogo, não o áudio.</p>
+      </section>
+
+      <section class="card">
+        <h3>4. Dificuldade</h3>
+        <div class="choices inline" id="difficulty">
+          <label><input type="radio" name="diff" value="70"> Fácil</label>
+          <label><input type="radio" name="diff" value="45" checked> Médio</label>
+          <label><input type="radio" name="diff" value="25"> Difícil</label>
+        </div>
+        <label class="check"><input type="checkbox" id="octaveFree" checked>
+          Aceitar qualquer oitava <span class="muted small">(para cantar parte masculina com voz feminina e vice-versa)</span></label>
+
+        <h3>5. Volumes</h3>
+        <div class="row"><label for="partnerVol">Outra voz</label><input type="range" id="partnerVol" min="0" max="1" step="0.05" value="0.8"></div>
+        <div class="row"><label for="guideVol">Guia da minha voz</label><input type="range" id="guideVol" min="0" max="1" step="0.05" value="0.25"></div>
+        <div class="row" id="accompRow"><label for="accompVol">Acompanhamento</label><input type="range" id="accompVol" min="0" max="1" step="0.05" value="0.6"></div>
+        <div class="row" id="audioVolRow" hidden><label for="audioVol">Instrumental</label><input type="range" id="audioVol" min="0" max="1" step="0.05" value="0.8"></div>
+        <p class="muted small">"Guia da minha voz" toca a sua própria parte baixinho. Ótimo para aprender; tire quando já souber.</p>
+
+        <h3>6. Áudio da música (opcional)</h3>
+        <div class="row">
+          <label class="btn small">Escolher MP3/instrumental <input type="file" id="audioFile" accept="audio/*" hidden></label>
+          <span id="audioName" class="muted small">nenhum</span>
+          <button class="link small" id="audioRemove" hidden>remover</button>
+        </div>
+        <div class="row" id="audioOffsetRow" hidden>
+          <label for="audioOffset">Sincronia</label>
+          <input type="range" id="audioOffset" min="-3" max="3" step="0.05" value="0">
+          <output id="audioOffsetOut">0,00 s</output>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h3>Microfone</h3>
+      <div class="row wrap">
+        <button class="btn" id="micTest">Testar microfone</button>
+        <div class="meter"><div id="micLevel"></div></div>
+        <span id="micNote" class="big-note">–</span>
+      </div>
+      <label class="check"><input type="checkbox" id="headphones" checked>
+        Estou de fone de ouvido <span class="muted small">(recomendado: sem fone, o microfone escuta a outra voz e confunde a nota)</span></label>
+      <div class="row">
+        <label for="latency">Atraso do microfone</label>
+        <input type="range" id="latency" min="0" max="0.35" step="0.01" value="0.08">
+        <output id="latencyOut">80 ms</output>
+      </div>
+    </section>
+
+    <div class="start-row">
+      <button class="btn primary big" id="startBtn">Cantar! 🎶</button>
+      <details class="practice">
+        <summary>Praticar um trecho em repetição</summary>
+        <div id="lineList" class="line-list"></div>
+      </details>
+    </div>
+  </main>
+
+  <!-- ============ JOGO ============ -->
+  <main id="screen-game" class="screen game">
+    <div class="hud">
+      <div class="hud-left">
+        <div class="score" id="hudScore">0</div>
+        <div class="combo" id="hudCombo"></div>
+      </div>
+      <div class="hud-mid">
+        <div class="notes-now">
+          <span>alvo <b id="hudTarget">–</b></span>
+          <span>você <b id="hudSung">–</b></span>
+        </div>
+        <div class="tuner" id="hudTuner" data-state="idle"><div class="needle"></div></div>
+        <div class="cents" id="hudCents"></div>
+      </div>
+      <div class="hud-right">
+        <button class="btn small" id="pauseBtn">Pausar</button>
+        <button class="btn small" id="quitBtn">Sair</button>
+      </div>
+    </div>
+    <div class="interval" id="hudInterval"></div>
+    <div class="stage">
+      <canvas id="stage"></canvas>
+      <div class="feedback" id="hudFeedback"></div>
+      <div class="legend">
+        <span class="lg mine"></span> sua parte
+        <span class="lg partner"></span> outra voz
+        <span class="lg voice"></span> sua voz
+      </div>
+    </div>
+    <div class="progress"><div id="hudProgress"></div></div>
+    <div class="lyrics" id="lyrics"></div>
+  </main>
+
+  <!-- ============ RESULTADO ============ -->
+  <main id="screen-results" class="screen">
+    <div class="results">
+      <div class="stars" id="resStars"></div>
+      <div class="res-score" id="resScore"></div>
+      <div class="muted" id="resBest"></div>
+      <div class="res-grid">
+        <div class="stat"><span id="resPct"></span><small>afinação</small></div>
+        <div class="stat"><span id="resCombo"></span><small>maior combo</small></div>
+        <div class="stat"><span id="resTend"></span><small>tendência</small></div>
+      </div>
+      <p id="resTip" class="tip"></p>
+      <div class="actions center">
+        <button class="btn primary" id="againBtn">Cantar de novo</button>
+        <button class="btn" id="swapBtn">Trocar de voz ⇄</button>
+        <button class="btn" data-go="setup">Ajustes</button>
+        <button class="btn" data-go="library">Músicas</button>
+      </div>
+      <h3>Trecho por trecho</h3>
+      <p class="muted small">Clique em "praticar" para repetir um trecho em loop até acertar.</p>
+      <div id="resLines" class="line-list"></div>
+    </div>
+  </main>
+
+  <!-- ============ IMPORTAR MIDI ============ -->
+  <dialog id="midiDialog">
+    <form method="dialog" class="midi-form">
+      <h2>Importar MIDI</h2>
+      <div class="row"><label for="midiTitle">Título</label><input id="midiTitle" required></div>
+      <div class="row"><label for="midiArtist">Artista</label><input id="midiArtist"></div>
+      <p class="muted small">Ouça as faixas e escolha quem canta o quê. Faixas "melódicas" (uma nota por vez) costumam ser as vozes.</p>
+      <div id="midiTracks" class="tracks"></div>
+      <div class="row"><label for="midiV1">Primeira voz</label><select id="midiV1"></select></div>
+      <div class="row"><label for="midiV2">Segunda voz</label><select id="midiV2"></select></div>
+      <label class="check"><input type="checkbox" id="midiAccomp" checked> Usar as outras faixas como acompanhamento</label>
+      <p id="midiLyricsInfo" class="muted small"></p>
+      <div class="actions">
+        <button value="cancel" class="btn">Cancelar</button>
+        <button value="ok" class="btn primary" id="midiOk">Importar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/music.js"></script>
+  <script src="js/pitch.js"></script>
+  <script src="js/parsers.js"></script>
+  <script src="js/demos.js"></script>
+  <script src="js/synth.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
