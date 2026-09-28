@@ -16,6 +16,38 @@ Depois abra `http://localhost:8080` no Chrome, Edge ou Firefox e permita o micro
 
 > **Use fone de ouvido.** Sem fone, o microfone escuta a outra voz saindo da caixa de som e confunde a detecção da sua nota.
 
+## Microfone e caixa de som
+
+O app precisa **ouvir a sua voz** para saber se você está no tom. Na tela da música:
+
+- **Entrada**: escolha qual microfone o app usa.
+- **"O microfone só capta a minha voz"**: deixe marcado se o microfone vai direto no computador (ou se você usa fone).
+- **Calibrar atraso**: caixas Bluetooth atrasam o som. Toque em "Calibrar", diga "tá" junto com os 8 bipes e o app
+  mede o atraso total (caixa + microfone) sozinho.
+
+## Músicas de verdade (ex.: um dueto)
+
+Para cantar com a gravação original — por exemplo, você faz a parte da cantora e o cantor continua cantando a dele:
+
+1. Prepare a música a partir do MP3 (separa voz e instrumental, extrai as notas e divide em trechos):
+
+   ```bash
+   pip install -r tools/requirements.txt      # precisa também do ffmpeg
+   python tools/preparar_musica.py musica.mp3 --titulo "Nome" --artista "Artistas" --cantores "Ela,Ele"
+   ```
+
+   Isso gera um arquivo `Nome.karaoke` (demora ~2× a duração da música). O Claude também pode preparar para você.
+2. No app, **Importar música preparada (.karaoke)**.
+3. Confira **quem canta cada trecho** (o app chuta pela altura: voz aguda × grave), ouça com ▶ e corrija se precisar.
+   Cole a letra (uma linha por trecho).
+4. Escolha a sua voz: nos seus trechos a voz original some (ou fica baixinha como guia); nos do outro cantor, ela toca.
+
+## Treino por etapas e gravação
+
+- **Praticar um trecho** abre o treino em etapas: 1) ouvir a sua parte → 2) cantar com o guia → 3) guia baixinho →
+  4) sem guia → 5) sem ver as notas. Você sobe de etapa quando acerta 75% do trecho (ou usa ◀ ▶).
+- Quando você canta a música inteira, o app **grava você junto com a música**. No resultado dá para ouvir e baixar.
+
 ## Como funciona o jogo
 
 - **Trilha de notas**: as barras rosa são a sua parte, as verdes são a outra voz; a linha amarela é a sua voz.
@@ -60,6 +92,9 @@ js/pitch.js       detecção de altura da voz (algoritmo YIN)
 js/parsers.js     importação UltraStar e MIDI/KAR
 js/demos.js       músicas de demonstração (domínio público)
 js/synth.js       sintetizador da outra voz / guia / acompanhamento
+js/stems.js       músicas gravadas: trechos, tom/velocidade (SoundTouch), player
+js/vendor/        SoundTouchJS (LGPL-2.1)
+tools/            preparar_musica.py: MP3 -> arquivo .karaoke
 js/game.js        relógio, pontuação e desenho da trilha
 js/app.js         interface
 tests/run.js      testes (node tests/run.js)

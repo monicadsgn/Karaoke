@@ -28,7 +28,16 @@
     }
   });
 
-  function allSongs() { return K.DEMOS.concat(K.Store.songs()); }
+  function allSongs() {
+    return K.DEMOS.concat(K.Store.songs().map((s) => (s.type === 'stems' ? { ...s, voices: K.stemsVoices(s) } : s)));
+  }
+
+  function busy(text) {
+    let el = document.querySelector('.busy');
+    if (text == null) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.className = 'busy'; document.body.appendChild(el); }
+    el.textContent = text;
+  }
   function newId() { return 'song-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
   function fmtTime(s) { s = Math.max(0, s); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
@@ -42,20 +51,53 @@
   async function ensureMic() {
     const ctx = await ensureAudio();
     const headphones = $('headphones').checked;
-    if (state.mic && state.mic.headphones === headphones) return state.mic;
+    const deviceId = $('micDevice').value;
+    if (state.mic && state.mic.headphones === headphones && state.mic.deviceId === deviceId) return state.mic;
     if (state.mic) state.mic.stop();
     const mic = new K.Mic();
     try {
-      await mic.start(ctx, { headphones });
+      await mic.start(ctx, { headphones, deviceId });
     } catch (e) {
       toast('Não consegui acessar o microfone. Permita o acesso no navegador e tente de novo.', 6000);
       throw e;
     }
     mic.headphones = headphones;
+    mic.deviceId = deviceId;
     state.mic = mic;
+    if (state.game) state.game.mic = mic;
     $('micPill').classList.add('on');
     $('micPillText').textContent = 'mic ligado';
+    listMicDevices();
     return mic;
+  }
+
+  // lista as entradas de áudio (os nomes só aparecem depois de dar permissão ao microfone)
+  async function listMicDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+    const sel = $('micDevice');
+    const cur = sel.value || K.Store.globalPrefs().micDevice || '';
+    sel.innerHTML = '<option value="">Microfone padrão</option>' + devs
+      .filter((d) => d.deviceId && d.deviceId !== 'default')
+      .map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Entrada ' + (i + 1))}</option>`).join('');
+    sel.value = [...sel.options].some((o) => o.value === cur) ? cur : '';
+  }
+
+  function ensureGame() {
+    if (!state.game) {
+      state.game = new K.Game({
+        canvas: $('stage'),
+        lyricsEl: $('lyrics'),
+        hud: {
+          score: $('hudScore'), combo: $('hudCombo'), target: $('hudTarget'), sung: $('hudSung'),
+          tuner: $('hudTuner'), cents: $('hudCents'), interval: $('hudInterval'), feedback: $('hudFeedback'),
+          progress: $('hudProgress'), stage: $('hudStage'), stageName: $('hudStageName'),
+        },
+        onFinish: showResults,
+      });
+      state.game.init(state.ctx, state.mic);
+    }
+    return state.game;
   }
 
   // ---------------- biblioteca ----------------
@@ -114,6 +156,26 @@
         (song.audioHint ? ` Se tiver o áudio (${song.audioHint}), adicione na próxima tela.` : ''), 5000);
       openSong(song.id);
     } catch (err) {
+      toast('Erro ao importar: ' + err.message, 6000);
+    }
+  });
+
+  $('importKaraoke').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    busy('Importando…');
+    try {
+      const { song, blobs } = K.parseKaraokeFile(await f.text());
+      song.id = newId();
+      await K.Store.saveAudio(song.id + ':inst', blobs.inst);
+      await K.Store.saveAudio(song.id + ':voc', blobs.voc);
+      K.Store.saveSong(song);
+      busy(null);
+      toast(`"${song.title}" importada! Confira quem canta cada trecho.`, 5000);
+      openSong(song.id);
+    } catch (err) {
+      busy(null);
       toast('Erro ao importar: ' + err.message, 6000);
     }
   });
@@ -193,7 +255,7 @@
   // ---------------- tela da música ----------------
   const DEFAULTS = {
     myVoice: 0, partner: null, transpose: 0, rate: 1, tolerance: 45, octaveFree: true,
-    partnerVol: 0.8, guideVol: 0.25, accompVol: 0.6, audioVol: 0.8, audioOffset: 0,
+    partnerVol: 0.8, guideVol: 0.25, accompVol: 0.6, audioVol: 0.8, audioOffset: 0, jointMode: 'play',
   };
 
   async function openSong(id) {
@@ -205,6 +267,16 @@
     if (!s.partner) s.partner = song.voices.length > 1 ? 'voice:' + (s.myVoice === 0 ? 1 : 0) : 'third_above';
     if (s.myVoice >= song.voices.length) s.myVoice = 0;
     $('headphones').checked = g.headphones ?? true;
+    const stems = song.type === 'stems';
+    $('partnerBlock').hidden = stems;
+    $('audioBlock').hidden = stems;
+    $('phraseCard').hidden = !stems;
+    $('accompVolLabel').textContent = stems ? 'Instrumental' : 'Acompanhamento';
+    $('guideVolLabel').textContent = stems ? 'Voz original da minha parte' : 'Guia da minha voz';
+    $('guideHelp').textContent = stems
+      ? 'Nos seus trechos, a voz original fica neste volume: alto para aprender, zero para cantar só você.'
+      : '"Guia da minha voz" toca a sua própria parte baixinho. Ótimo para aprender; tire quando já souber.';
+    if (stems) renderPhrases();
 
     $('setupTitle').textContent = song.title;
     $('setupArtist').textContent = song.artist || '';
@@ -222,6 +294,12 @@
         <b>${esc(v.name)}</b><span class="muted small">${rangeText(v.notes, s.transpose)}</span>
       </label>`).join('');
 
+    if (song.type === 'stems') {
+      const other = song.voices.find((_, i) => i !== s.myVoice);
+      $('partnerVolLabel').textContent = other ? 'Voz de ' + other.name : 'Outra voz';
+    } else {
+      $('partnerVolLabel').textContent = 'Outra voz';
+    }
     const partnerOpts = [];
     song.voices.forEach((v, i) => { if (i !== s.myVoice) partnerOpts.push([`voice:${i}`, v.name]); });
     for (const [k, cfg] of Object.entries(K.HARMONY_MODES)) partnerOpts.push([k, cfg.label]);
@@ -323,30 +401,173 @@
     if (micTestOn) tick();
   };
 
+  // ---------------- editor de trechos (músicas gravadas) ----------------
+  function storedSong() { return K.Store.songs().find((x) => x.id === state.song.id); }
+
+  function renderPhrases() {
+    const song = storedSong();
+    $('singerA').value = song.singers.A;
+    $('singerB').value = song.singers.B;
+    $('jointMode').value = state.settings.jointMode || 'play';
+    const opt = (v, l, cur) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+    $('phraseList').innerHTML = song.phrases.map((p, i) => `
+      <div class="phrase" data-i="${i}" data-who="${p.who}">
+        <button class="btn small" data-play="${i}" title="Ouvir">▶</button>
+        <span class="time">${fmtTime(p.t0)}</span>
+        <select data-who-sel="${i}">
+          ${opt('A', song.singers.A, p.who)}${opt('B', song.singers.B, p.who)}${opt('AB', 'Juntos', p.who)}${opt('-', 'Ignorar', p.who)}
+        </select>
+        <input data-lyric="${i}" value="${esc(p.lyric || '')}" placeholder="letra deste trecho (opcional)">
+      </div>`).join('');
+  }
+
+  function updateStoredSong(fn) {
+    const song = storedSong();
+    fn(song);
+    K.Store.saveSong(song);
+    const fresh = allSongs().find((x) => x.id === song.id);
+    state.song = fresh;
+    if (state.settings.myVoice >= fresh.voices.length) state.settings.myVoice = 0;
+  }
+
+  $('phraseList').addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-who-sel]');
+    const inp = e.target.closest('[data-lyric]');
+    if (sel) {
+      const i = +sel.dataset.whoSel;
+      updateStoredSong((song) => { song.phrases[i].who = sel.value; });
+      sel.closest('.phrase').dataset.who = sel.value;
+      syncSetupForm();
+    } else if (inp) {
+      updateStoredSong((song) => { song.phrases[+inp.dataset.lyric].lyric = inp.value; });
+    }
+  });
+
+  $('phraseList').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-play]');
+    if (!b) return;
+    await ensureAudio();
+    const g = ensureGame();
+    try { await loadStems(g); } catch (err) { return; }
+    const p = state.song.phrases[+b.dataset.play];
+    g.stems.preview(Math.max(0, p.t0 - 0.2), p.t1 + 0.3);
+  });
+
+  for (const k of ['A', 'B']) {
+    $('singer' + k).addEventListener('change', (e) => {
+      updateStoredSong((song) => { song.singers[k] = e.target.value.trim() || (k === 'A' ? 'Voz aguda' : 'Voz grave'); });
+      renderPhrases();
+      syncSetupForm();
+    });
+  }
+  $('jointMode').onchange = (e) => { state.settings.jointMode = e.target.value; saveSettings(); };
+  $('lyricsApply').onclick = () => {
+    const lines = $('lyricsPaste').value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    updateStoredSong((song) => {
+      let li = 0;
+      for (const p of song.phrases) {
+        if (p.who === '-') continue;
+        p.lyric = lines[li++] || '';
+      }
+    });
+    renderPhrases();
+    toast(`${lines.length} linhas distribuídas. Confira ouvindo cada trecho.`);
+  };
+
+  async function loadStems(g) {
+    const id = state.song.id;
+    if (g.stems.songId === id && g.stems.raw) return;
+    busy('Carregando áudio…');
+    try {
+      const blobs = { inst: await K.Store.loadAudio(id + ':inst'), voc: await K.Store.loadAudio(id + ':voc') };
+      if (!blobs.inst || !blobs.voc) throw new Error('Áudio desta música não encontrado. Importe o .karaoke de novo.');
+      await g.stems.load(id, blobs);
+    } catch (err) {
+      toast(err.message, 6000);
+      throw err;
+    } finally {
+      busy(null);
+    }
+  }
+
+  // ---------------- calibração de atraso ----------------
+  $('calibrate').onclick = async () => {
+    let mic;
+    try { mic = await ensureMic(); } catch (e) { return; }
+    const ctx = state.ctx;
+    const N = 8, gap = 0.8, t0 = ctx.currentTime + 1;
+    for (let i = 0; i < N; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 1000;
+      g.gain.setValueAtTime(0, t0 + i * gap);
+      g.gain.linearRampToValueAtTime(0.5, t0 + i * gap + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + i * gap + 0.12);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0 + i * gap); o.stop(t0 + i * gap + 0.15);
+    }
+    $('calibrateInfo').textContent = 'Diga "tá" junto com cada bipe…';
+    const samples = [];
+    await new Promise((resolve) => {
+      const tick = () => {
+        mic.read();
+        samples.push([ctx.currentTime, mic.level]);
+        if (ctx.currentTime < t0 + N * gap + 0.6) requestAnimationFrame(tick); else resolve();
+      };
+      tick();
+    });
+    const noise = samples.filter(([t]) => t < t0 - 0.1).map(([, l]) => l).sort((a, b) => a - b);
+    const floor = noise.length ? noise[Math.floor(noise.length / 2)] : 0.005;
+    const thr = Math.max(0.02, floor * 4);
+    const offsets = [];
+    for (let i = 0; i < N; i++) {
+      const beep = t0 + i * gap;
+      const hit = samples.find(([t, l], k) => t > beep - 0.15 && t < beep + gap - 0.1 && l > thr && (k === 0 || samples[k - 1][1] <= thr));
+      if (hit) offsets.push(hit[0] - beep);
+    }
+    if (offsets.length < 4) {
+      $('calibrateInfo').textContent = 'Não consegui ouvir você direito. Fale "tá" mais alto e tente de novo (e confira a entrada escolhida).';
+      return;
+    }
+    offsets.sort((a, b) => a - b);
+    const lat = Math.max(0, Math.min(0.6, offsets[Math.floor(offsets.length / 2)]));
+    state.settings.latency = +lat.toFixed(2);
+    $('latency').value = state.settings.latency;
+    $('latencyOut').textContent = Math.round(lat * 1000) + ' ms';
+    K.Store.saveGlobalPrefs({ latency: state.settings.latency });
+    saveSettings();
+    $('calibrateInfo').textContent = `Pronto! Atraso medido: ${Math.round(lat * 1000)} ms (${offsets.length} de ${N} bipes).`;
+  };
+
+  $('micDevice').onchange = (e) => { K.Store.saveGlobalPrefs({ micDevice: e.target.value }); };
+
   // ---------------- jogo ----------------
   async function play(practice = null) {
     try { await ensureMic(); } catch (e) { return; }
     micTestOn = false;
-    if (!state.game) {
-      state.game = new K.Game({
-        canvas: $('stage'),
-        lyricsEl: $('lyrics'),
-        hud: {
-          score: $('hudScore'), combo: $('hudCombo'), target: $('hudTarget'), sung: $('hudSung'),
-          tuner: $('hudTuner'), cents: $('hudCents'), interval: $('hudInterval'), feedback: $('hudFeedback'), progress: $('hudProgress'),
-        },
-        onFinish: showResults,
-      });
-      await state.game.init(state.ctx, state.mic);
-    }
-    state.game.mic = state.mic;
+    const game = ensureGame();
+    game.mic = state.mic;
+    const song = state.song;
     const s = { ...state.settings };
     if (s.partner === 'none') s.partner = null;
-    state.game.load(state.song, s, state.audioBlob);
+    if (song.type === 'stems') {
+      if (!song.voices.length) return toast('Marque pelo menos um trecho para cada cantor.');
+      try { await loadStems(game); } catch (e) { return; }
+      const needs = s.rate !== 1 || s.transpose !== 0;
+      if (needs) busy('Ajustando tom/velocidade… 0%');
+      await game.stems.prepare(s.rate, s.transpose, (p) => busy(`Ajustando tom/velocidade… ${Math.round(p * 100)}%`));
+      busy(null);
+      const other = song.voices.findIndex((_, i) => i !== s.myVoice);
+      s.partner = other >= 0 ? 'voice:' + other : null;
+      s.myKey = song.voices[s.myVoice].key;
+      s.partnerName = other >= 0 ? song.voices[other].name : '';
+      game.load(song, s, { stems: true });
+    } else {
+      game.load(song, s, { audioBlob: state.audioBlob });
+    }
     state.lastPractice = practice;
     show('game');
     $('pauseBtn').textContent = 'Pausar';
-    state.game.start(practice ? { from: practice.from, to: practice.to, loop: true } : {});
+    game.start(practice ? { from: practice.from, to: practice.to, loop: true } : {});
   }
 
   $('startBtn').onclick = () => play();
@@ -357,6 +578,8 @@
     play({ from, to });
   });
 
+  $('stagePrev').onclick = () => state.game.changeStage(-1);
+  $('stageNext').onclick = () => state.game.changeStage(1);
   $('pauseBtn').onclick = () => { const p = state.game.togglePause(); $('pauseBtn').textContent = p ? 'Continuar' : 'Pausar'; };
   $('quitBtn').onclick = () => {
     const g = state.game;
@@ -391,6 +614,23 @@
     $('resBest').textContent = bestTxt;
 
     $('resTip').textContent = tipFor(r);
+    if (state.recUrl) URL.revokeObjectURL(state.recUrl);
+    state.recUrl = r.recording ? URL.createObjectURL(r.recording) : null;
+    $('resRec').hidden = !r.recording;
+    if (r.recording) {
+      const au = $('resAudio');
+      au.src = state.recUrl;
+      // gravações do navegador vêm sem duração; isso força o cálculo para a barra funcionar
+      au.onloadedmetadata = () => {
+        if (au.duration === Infinity) {
+          au.ontimeupdate = () => { au.ontimeupdate = null; au.currentTime = 0; };
+          au.currentTime = 1e7;
+        }
+      };
+      $('resDownload').href = state.recUrl;
+      const ext = (r.recording.type.split('/')[1] || 'webm').split(';')[0];
+      $('resDownload').download = `${song.title} - ${song.voices[s.myVoice].name}.${ext}`;
+    }
     const worst = r.lines.slice().sort((a, b) => a.acc - b.acc);
     const worstIdx = new Set(worst.slice(0, 3).filter((l) => l.acc < 0.8).map((l) => l.idx));
     $('resLines').innerHTML = r.lines.map((l) => `

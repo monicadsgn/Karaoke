@@ -9,10 +9,10 @@
   };
 
   class Scheduler {
-    constructor(ctx) {
+    constructor(ctx, output) {
       this.ctx = ctx;
       this.master = ctx.createGain();
-      this.master.connect(ctx.destination);
+      this.master.connect(output || ctx.destination);
       this.buses = {};
       for (const k of Object.keys(TIMBRES)) {
         const g = ctx.createGain();

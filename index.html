@@ -26,6 +26,9 @@
       <div class="section-head">
         <h2>Músicas</h2>
         <div class="actions">
+          <label class="btn primary">Importar música preparada (.karaoke)
+            <input type="file" id="importKaraoke" accept=".karaoke,application/json" hidden>
+          </label>
           <label class="btn">Importar UltraStar (.txt)
             <input type="file" id="importUltrastar" accept=".txt,text/plain" hidden>
           </label>
@@ -40,6 +43,8 @@
     <details class="help">
       <summary>Como colocar as músicas que eu gosto?</summary>
       <ul>
+        <li><b>Música preparada (.karaoke)</b> — a gravação original com a voz separada do instrumental, feita a partir do
+          MP3 com o script <code>tools/preparar_musica.py</code>. Nos seus trechos a voz original some; nos do outro cantor, ela continua.</li>
         <li><b>UltraStar (.txt)</b> — o formato de karaokê "estilo SingStar". Existem arquivos feitos pela comunidade para muitas músicas,
           inclusive <b>duetos</b> (arquivos com <code>P1</code> e <code>P2</code>) — perfeitos pra harmonia. Importe o .txt e, se quiser, adicione o MP3 instrumental ou original na tela da música.</li>
         <li><b>MIDI / KAR</b> — arquivos de karaokê MIDI. Você escolhe qual faixa é a primeira voz e qual é a segunda; as outras viram acompanhamento. Letra de .kar é importada automaticamente.</li>
@@ -60,9 +65,11 @@
         <div id="voiceChoice" class="choices"></div>
         <p class="muted small" id="rangeInfo"></p>
 
-        <h3>2. Quem canta com você?</h3>
-        <select id="partnerSelect"></select>
-        <p class="muted small">Dica: cante uma vez com a voz da música, depois troque de lado para treinar a outra parte.</p>
+        <div id="partnerBlock">
+          <h3>2. Quem canta com você?</h3>
+          <select id="partnerSelect"></select>
+          <p class="muted small">Dica: cante uma vez com a voz da música, depois troque de lado para treinar a outra parte.</p>
+        </div>
 
         <h3>3. Tom e velocidade</h3>
         <div class="row">
@@ -91,12 +98,13 @@
           Aceitar qualquer oitava <span class="muted small">(para cantar parte masculina com voz feminina e vice-versa)</span></label>
 
         <h3>5. Volumes</h3>
-        <div class="row"><label for="partnerVol">Outra voz</label><input type="range" id="partnerVol" min="0" max="1" step="0.05" value="0.8"></div>
-        <div class="row"><label for="guideVol">Guia da minha voz</label><input type="range" id="guideVol" min="0" max="1" step="0.05" value="0.25"></div>
-        <div class="row" id="accompRow"><label for="accompVol">Acompanhamento</label><input type="range" id="accompVol" min="0" max="1" step="0.05" value="0.6"></div>
+        <div class="row"><label for="partnerVol" id="partnerVolLabel">Outra voz</label><input type="range" id="partnerVol" min="0" max="1" step="0.05" value="0.8"></div>
+        <div class="row"><label for="guideVol" id="guideVolLabel">Guia da minha voz</label><input type="range" id="guideVol" min="0" max="1" step="0.05" value="0.25"></div>
+        <div class="row" id="accompRow"><label for="accompVol" id="accompVolLabel">Acompanhamento</label><input type="range" id="accompVol" min="0" max="1" step="0.05" value="0.6"></div>
         <div class="row" id="audioVolRow" hidden><label for="audioVol">Instrumental</label><input type="range" id="audioVol" min="0" max="1" step="0.05" value="0.8"></div>
-        <p class="muted small">"Guia da minha voz" toca a sua própria parte baixinho. Ótimo para aprender; tire quando já souber.</p>
+        <p class="muted small" id="guideHelp">"Guia da minha voz" toca a sua própria parte baixinho. Ótimo para aprender; tire quando já souber.</p>
 
+        <div id="audioBlock">
         <h3>6. Áudio da música (opcional)</h3>
         <div class="row">
           <label class="btn small">Escolher MP3/instrumental <input type="file" id="audioFile" accept="audio/*" hidden></label>
@@ -108,8 +116,33 @@
           <input type="range" id="audioOffset" min="-3" max="3" step="0.05" value="0">
           <output id="audioOffsetOut">0,00 s</output>
         </div>
+        </div>
       </section>
     </div>
+
+    <section class="card" id="phraseCard" hidden>
+      <h3>Quem canta cada trecho</h3>
+      <p class="muted small">O app separou a voz em trechos e tentou adivinhar quem canta cada um pela altura (voz aguda × grave).
+        Confira ouvindo (▶) e corrija se precisar. "Juntos" = os dois cantam ao mesmo tempo.</p>
+      <div class="row wrap">
+        <label for="singerA">Voz aguda</label><input id="singerA" class="short">
+        <label for="singerB">Voz grave</label><input id="singerB" class="short">
+      </div>
+      <div class="row">
+        <label for="jointMode">Trechos "juntos"</label>
+        <select id="jointMode">
+          <option value="play">tocar a gravação original (você canta junto)</option>
+          <option value="mute">silenciar a voz original (só você canta)</option>
+        </select>
+      </div>
+      <div id="phraseList" class="phrase-list"></div>
+      <details>
+        <summary>Colar a letra</summary>
+        <p class="muted small">Cole a letra com <b>uma linha por trecho</b>, na ordem da lista acima (linhas vazias são ignoradas). Depois dá pra ajustar cada trecho.</p>
+        <textarea id="lyricsPaste" rows="8"></textarea>
+        <button class="btn small" id="lyricsApply">Distribuir nos trechos</button>
+      </details>
+    </section>
 
     <section class="card">
       <h3>Microfone</h3>
@@ -118,12 +151,20 @@
         <div class="meter"><div id="micLevel"></div></div>
         <span id="micNote" class="big-note">–</span>
       </div>
-      <label class="check"><input type="checkbox" id="headphones" checked>
-        Estou de fone de ouvido <span class="muted small">(recomendado: sem fone, o microfone escuta a outra voz e confunde a nota)</span></label>
       <div class="row">
-        <label for="latency">Atraso do microfone</label>
-        <input type="range" id="latency" min="0" max="0.35" step="0.01" value="0.08">
+        <label for="micDevice">Entrada</label>
+        <select id="micDevice"><option value="">Microfone padrão</option></select>
+      </div>
+      <label class="check"><input type="checkbox" id="headphones" checked>
+        O microfone só capta a minha voz <span class="muted small">(fone de ouvido, ou microfone ligado direto no computador. Se o microfone também escuta a caixa de som, desmarque)</span></label>
+      <div class="row">
+        <label for="latency">Atraso total</label>
+        <input type="range" id="latency" min="0" max="0.6" step="0.01" value="0.08">
         <output id="latencyOut">80 ms</output>
+      </div>
+      <div class="row wrap">
+        <button class="btn small" id="calibrate">Calibrar atraso</button>
+        <span class="muted small" id="calibrateInfo">Caixa Bluetooth atrasa o som. Calibre: vão tocar 8 bipes; diga "tá" junto com cada um.</span>
       </div>
     </section>
 
@@ -156,6 +197,11 @@
         <button class="btn small" id="quitBtn">Sair</button>
       </div>
     </div>
+    <div class="stage-bar" id="hudStage" hidden>
+      <button class="btn small" id="stagePrev" title="Etapa anterior">◀</button>
+      <span id="hudStageName"></span>
+      <button class="btn small" id="stageNext" title="Próxima etapa">▶</button>
+    </div>
     <div class="interval" id="hudInterval"></div>
     <div class="stage">
       <canvas id="stage"></canvas>
@@ -182,6 +228,11 @@
         <div class="stat"><span id="resTend"></span><small>tendência</small></div>
       </div>
       <p id="resTip" class="tip"></p>
+      <div id="resRec" class="rec" hidden>
+        <h3>Sua gravação</h3>
+        <audio id="resAudio" controls></audio>
+        <a class="btn small" id="resDownload" download="minha-gravacao.webm">Baixar</a>
+      </div>
       <div class="actions center">
         <button class="btn primary" id="againBtn">Cantar de novo</button>
         <button class="btn" id="swapBtn">Trocar de voz ⇄</button>
@@ -219,7 +270,9 @@
   <script src="js/pitch.js"></script>
   <script src="js/parsers.js"></script>
   <script src="js/demos.js"></script>
+  <script src="js/vendor/soundtouch.js"></script>
   <script src="js/synth.js"></script>
+  <script src="js/stems.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/game.js"></script>
   <script src="js/app.js"></script>

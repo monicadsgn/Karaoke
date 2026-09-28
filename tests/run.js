@@ -1,6 +1,6 @@
 // Testes rápidos sem dependências: node tests/run.js
 const assert = require('assert');
-for (const f of ['music', 'pitch', 'parsers', 'demos']) require('../js/' + f + '.js');
+for (const f of ['music', 'pitch', 'parsers', 'demos', 'stems']) require('../js/' + f + '.js');
 const K = globalThis.K;
 let passed = 0;
 const test = (name, fn) => { fn(); passed++; console.log('ok -', name); };
@@ -100,6 +100,26 @@ test('MIDI: tempo, faixas, letra .kar', () => {
 test('toMonophonic mantém a nota mais aguda', () => {
   const m = K.toMonophonic([{ t: 0, d: 1, midi: 60 }, { t: 0, d: 1, midi: 64 }, { t: 0.5, d: 1, midi: 62 }]);
   assert.deepStrictEqual(m.map((n) => [n.midi, n.d]), [[64, 0.5], [62, 1]]);
+});
+
+test('música gravada: trechos viram vozes', () => {
+  const song = {
+    singers: { A: 'Celine', B: 'Peabo' },
+    phrases: [
+      { t0: 0, t1: 2, who: 'A', lyric: 'Linha dela' },
+      { t0: 3, t1: 5, who: 'B', lyric: 'Linha dele' },
+      { t0: 6, t1: 8, who: 'AB', lyric: 'Juntos' },
+      { t0: 9, t1: 10, who: '-', lyric: '' },
+    ],
+    notes: [
+      { t: 0.1, d: 0.5, midi: 72 }, { t: 1, d: 0.5, midi: 74 },
+      { t: 3.1, d: 0.5, midi: 60 }, { t: 6.2, d: 0.5, midi: 67 }, { t: 9.2, d: 0.5, midi: 50 },
+    ],
+  };
+  const [a, b] = K.stemsVoices(song);
+  assert.strictEqual(a.name, 'Celine');
+  assert.deepStrictEqual(a.notes.map((n) => [n.midi, n.lyric, !!n.free]), [[72, 'Linha dela', false], [74, '', false], [67, 'Juntos', true]]);
+  assert.deepStrictEqual(b.notes.map((n) => n.midi), [60, 67]);
 });
 
 console.log(`\n${passed} testes passaram`);

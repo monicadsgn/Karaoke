@@ -2,13 +2,14 @@
 (function (K) {
   // ---------------- Microfone ----------------
   class Mic {
-    async start(ctx, { headphones = true } = {}) {
+    async start(ctx, { headphones = true, deviceId = '' } = {}) {
       this.ctx = ctx;
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: !headphones, // sem fone, tenta remover o som do alto-falante
           noiseSuppression: false,
           autoGainControl: false,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
         },
       });
       this.src = ctx.createMediaStreamSource(this.stream);
@@ -52,6 +53,16 @@
       partnerName = g.name + ' · tom: ' + K.keyName(g.key);
     }
 
+    // músicas gravadas: a letra fica no trecho; vai na 1ª nota de cada trecho
+    if (song.type === 'stems') {
+      for (const list of [mine, partner]) {
+        let last = -1;
+        for (const n of list) {
+          n.lyric = '';
+          if (n.line !== last) { n.lyric = (song.phrases[n.line] && song.phrases[n.line].lyric) || ''; last = n.line; }
+        }
+      }
+    }
     for (const n of mine) { n.hit = 0; n.total = 0; n.samples = []; n.done = false; }
     const accomp = (song.accomp || []).map((n) => ({ ...n }));
     return { mine, partner, partnerName, accomp, transpose: tr };
@@ -71,6 +82,16 @@
     }));
   }
 
+  // Etapas do treino de um trecho: vai tirando a ajuda conforme você acerta
+  const STAGES = [
+    { name: 'Etapa 1 · Ouvir a sua parte', guide: 1, listen: true },
+    { name: 'Etapa 2 · Cantar junto com o guia', guide: 0.7 },
+    { name: 'Etapa 3 · Guia baixinho', guide: 0.3 },
+    { name: 'Etapa 4 · Sem guia', guide: 0 },
+    { name: 'Etapa 5 · Sem ver as notas', guide: 0, hideNotes: true },
+  ];
+  const STAGE_PASS = 75; // % de afinação para passar de etapa
+
   // ---------------- Jogo ----------------
   class Game {
     constructor({ canvas, lyricsEl, hud, onFinish }) {
@@ -87,14 +108,21 @@
     async init(ctx, mic) {
       this.ctx = ctx;
       this.mic = mic;
-      this.sched = new K.Scheduler(ctx);
+      this.out = ctx.createGain(); // tudo que o app toca passa aqui (e pode ser gravado)
+      this.out.connect(ctx.destination);
+      this.sched = new K.Scheduler(ctx, this.out);
+      this.stems = new K.StemPlayer(ctx, this.out);
     }
 
-    load(song, settings, audioBlob) {
+    // media: { audioBlob } para MP3 simples, ou { stems: true } quando o StemPlayer já está carregado
+    load(song, settings, media = {}) {
       this.song = song;
       this.s = settings;
+      this.stemMode = !!media.stems;
+      const audioBlob = media.audioBlob;
       this.data = prepare(song, settings);
       this.lines = linesOf(this.data.mine);
+      this.partnerName = settings.partnerName || '';
       this.partnerLines = linesOf(this.data.partner);
 
       const all = this.data.mine.concat(this.data.partner);
@@ -104,28 +132,31 @@
       this.yHi = Math.ceil(hi + pad);
 
       this.sched.setTracks([
-        { bus: 'partner', events: this.data.partner },
-        { bus: 'guide', events: this.data.mine },
+        { bus: 'partner', events: this.stemMode ? [] : this.data.partner },
+        { bus: 'guide', events: this.stemMode ? [] : this.data.mine },
         { bus: 'accomp', events: this.data.accomp, transpose: this.data.transpose },
       ]);
       this.sched.setVolume('partner', settings.partnerVol);
       this.sched.setVolume('guide', settings.guideVol);
       this.sched.setVolume('accomp', settings.accompVol);
 
-      if (this.audio) { this.audio.pause(); URL.revokeObjectURL(this.audio.src); this.audio = null; }
+      if (this.stemMode) this.stems.setVolumes({ inst: settings.accompVol, partner: settings.partnerVol, guide: settings.guideVol });
+      if (this.audio) { this.audio.pause(); URL.revokeObjectURL(this.audio.src); this.audioNode.disconnect(); this.audio = null; }
       if (audioBlob) {
         this.audio = new Audio(URL.createObjectURL(audioBlob));
         this.audio.volume = settings.audioVol ?? 1;
         this.audio.preservesPitch = true;
+        this.audioNode = this.ctx.createMediaElementSource(this.audio);
+        this.audioNode.connect(this.out);
       }
       const lastMine = this.data.mine[this.data.mine.length - 1];
       const lastPartner = this.data.partner[this.data.partner.length - 1];
       this.songEnd = Math.max(lastMine.t + lastMine.d, lastPartner ? lastPartner.t + lastPartner.d : 0) + 1.5;
     }
 
-    setVolumes(v) {
-      for (const k of ['partner', 'guide', 'accomp']) if (v[k + 'Vol'] != null) this.sched.setVolume(k, v[k + 'Vol']);
-      if (this.audio && v.audioVol != null) this.audio.volume = v.audioVol;
+    setGuide(v) {
+      if (this.stemMode) this.stems.setVolumes({ guide: v });
+      else this.sched.setVolume('guide', v);
     }
 
     // from/to: trecho (segundos) para praticar; loop repete o trecho
@@ -134,13 +165,17 @@
       this.range = { from: from ?? 0, to: to ?? this.songEnd, loop };
       this.practice = from != null;
       const preroll = 3 * this.s.rate;
-      const hasBacking = this.audio || this.data.accomp.length;
+      const hasBacking = this.audio || this.stemMode || this.data.accomp.length;
       this.startSong = this.practice ? from - 2.5 : hasBacking ? Math.min(0, first - preroll) : first - preroll;
       for (const n of this.data.mine) n.inRange = !n.free && n.t >= this.range.from - 0.01 && n.t < this.range.to;
       this.scored = this.data.mine.filter((n) => n.inRange);
       this.totalDur = this.scored.reduce((s, n) => s + n.d, 0) || 1;
       this.resetScore();
       this.loops = 0;
+      this.stage = this.practice && this.s.stages !== false ? 0 : null;
+      this._applyStage();
+      this.recording = null;
+      if (!this.practice && this.s.record !== false) this._startRecording();
       this._seekTo(this.startSong);
       this.running = true;
       this.paused = false;
@@ -160,11 +195,88 @@
     }
 
     _seekTo(t) {
-      this.anchorCtx = this.ctx.currentTime + 0.05;
+      this.anchorCtx = this.ctx.currentTime + 0.08;
       this.anchorSong = t;
       this.sched.seek(t);
       this.noteIdx = 0;
       if (this.audio) { this.audio.pause(); this.audioStarted = false; }
+      if (this.stemMode) this.stems.play(t, this.anchorCtx, this.song.phrases, this.s.myKey, this.s.jointMode);
+    }
+
+    _applyStage() {
+      const st = this.stage == null ? null : STAGES[this.stage];
+      this.hideNotes = !!(st && st.hideNotes);
+      this.setGuide(st ? st.guide * Math.max(this.s.guideVol, 0.6) : this.s.guideVol);
+      if (this.hud.stage) {
+        this.hud.stage.hidden = !st;
+        if (st) this.hud.stageName.textContent = st.name + (st.listen ? ' (só escute)' : ` · passe com ${STAGE_PASS}%`);
+      }
+    }
+
+    changeStage(delta) {
+      if (this.stage == null) return;
+      this.stage = Math.max(0, Math.min(STAGES.length - 1, this.stage + delta));
+      this._applyStage();
+    }
+
+    _endLoop() {
+      this.loops++;
+      const r = (this.lastLoopResult = this.results());
+      if (this.stage != null) {
+        const st = STAGES[this.stage];
+        if (st.listen || r.pct >= STAGE_PASS) {
+          if (this.stage < STAGES.length - 1) {
+            this.stage++;
+            this._stageMsg(st.listen ? 'Agora é sua vez de cantar!' : `Passou com ${Math.round(r.pct)}%! Menos ajuda agora.`);
+          } else {
+            this._stageMsg(`Trecho dominado! (${Math.round(r.pct)}%)`);
+          }
+        } else {
+          this._stageMsg(`${Math.round(r.pct)}% — mais uma vez`);
+        }
+        this._applyStage();
+      }
+      this.resetScore();
+      this._seekTo(Math.max(this.range.from - 2, -1));
+    }
+
+    _stageMsg(text) {
+      this.feedback = { text, cls: 'stage', at: performance.now(), long: true };
+    }
+
+    // grava a sua voz junto com o que está tocando (o playback atrasa o mesmo tanto que o microfone)
+    _startRecording() {
+      if (!window.MediaRecorder || !this.mic.src) return;
+      try {
+        const ctx = this.ctx;
+        const dest = ctx.createMediaStreamDestination();
+        const delay = ctx.createDelay(1.5);
+        delay.delayTime.value = Math.min(1.4, this.s.latency || 0);
+        const back = ctx.createGain(); back.gain.value = 0.7;
+        const voice = ctx.createGain(); voice.gain.value = 1.4;
+        this.out.connect(delay).connect(back).connect(dest);
+        this.mic.src.connect(voice).connect(dest);
+        const rec = new MediaRecorder(dest.stream);
+        const chunks = [];
+        rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+        this.recorder = { rec, chunks, nodes: [delay, back, voice], done: new Promise((r) => (rec.onstop = r)) };
+        rec.start(1000);
+      } catch (e) {
+        console.warn('Gravação indisponível', e);
+        this.recorder = null;
+      }
+    }
+
+    async _stopRecording(keep) {
+      const r = this.recorder;
+      if (!r) return null;
+      this.recorder = null;
+      if (r.rec.state !== 'inactive') r.rec.stop();
+      await r.done;
+      try { this.out.disconnect(r.nodes[0]); } catch (e) { /* ok */ }
+      try { this.mic.src.disconnect(r.nodes[2]); } catch (e) { /* ok */ }
+      r.nodes.forEach((n) => n.disconnect());
+      return keep && r.chunks.length ? new Blob(r.chunks, { type: r.rec.mimeType || 'audio/webm' }) : null;
     }
 
     songTime() {
@@ -178,8 +290,11 @@
         this.pausedAt = this.songTime();
         this.paused = true;
         this.sched.stopAll();
+        this.stems.stop();
         if (this.audio) this.audio.pause();
+        if (this.recorder && this.recorder.rec.state === 'recording') this.recorder.rec.pause();
       } else {
+        if (this.recorder && this.recorder.rec.state === 'paused') this.recorder.rec.resume();
         this.paused = false;
         this._seekTo(this.pausedAt);
       }
@@ -189,7 +304,9 @@
     stop() {
       this.running = false;
       this.sched.stopAll();
+      this.stems.stop();
       if (this.audio) this.audio.pause();
+      this._stopRecording(false);
     }
 
     _syncAudio(t) {
@@ -221,7 +338,7 @@
       // pitch do microfone (compensa a latência)
       const raw = this.mic.read();
       const tt = t - (this.s.latency || 0);
-      if (!this.paused) this._score(tt, raw, dtReal * this.s.rate);
+      if (!this.paused) this._score(tt, raw, this.stage != null && STAGES[this.stage].listen ? 0 : dtReal * this.s.rate);
 
       this._render(t, tt);
       this._renderLyrics(t);
@@ -230,10 +347,7 @@
       if (!this.paused) {
         if (t > this.range.to + (this.practice ? 0.6 : 0)) {
           if (this.range.loop) {
-            this.loops++;
-            this.lastLoopResult = this.results();
-            this.resetScore();
-            this._seekTo(Math.max(this.range.from - 2, -1));
+            this._endLoop();
           } else if (this.practice || t > this.songEnd) {
             this.finish();
             return;
@@ -333,11 +447,17 @@
       };
     }
 
-    finish() {
+    async finish() {
       // fecha notas pendentes
       for (const n of this.data.mine) if (!n.done) this._closeNote(n);
-      this.stop();
-      if (this.onFinish) this.onFinish(this.results());
+      const res = this.results();
+      this.running = false;
+      this.sched.stopAll();
+      this.stems.stop();
+      if (this.audio) this.audio.pause();
+      res.recording = await this._stopRecording(true);
+      res.stage = this.stage != null ? STAGES[this.stage].name : null;
+      if (this.onFinish) this.onFinish(res);
     }
 
     // ---------------- desenho ----------------
@@ -389,6 +509,7 @@
       // minhas notas
       for (const n of this.data.mine) {
         if (n.t + n.d < tStart || n.t > tEnd) continue;
+        if (this.hideNotes && n.t > tt) continue; // etapa "sem ver as notas": só aparece depois de cantar
         const nx = x(n.t), nw = Math.max(4, n.d * pxs), ny = y(n.midi + 0.5) + 1, nh = rowH - 2;
         g.fillStyle = n.free ? col('--free') : col('--mine');
         roundRect(g, nx, ny, nw, nh, 6);
@@ -469,19 +590,27 @@
       const cur = this.lines[i], next = this.lines[i + 1];
       const pi = lineIdx(this.partnerLines);
       const pcur = this.partnerLines[pi];
-      const key = [i, pi].join(':');
+      const key = [i, pi, pcur && pcur.start - tt < 4].join(':');
       if (key !== this._lyricsKey) {
         this._lyricsKey = key;
         const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-        const syl = (l) => l ? l.notes.map((n, k) => `<span>${esc(n.lyric)}</span>`).join('') : '';
-        const partnerTxt = pcur && pcur.text && pcur.start - tt < 4 ? esc(pcur.text) : '';
+        const syl = (l) => {
+          if (!l) return '';
+          if (this.stemMode) return `<span class="wipe">${esc(l.text) || '♪ sua vez ♪'}</span>`;
+          return l.notes.map((n) => `<span>${esc(n.lyric)}</span>`).join('');
+        };
+        let partnerTxt = pcur && pcur.start - tt < 4 ? esc(pcur.text || (this.stemMode ? '…' : '')) : '';
+        if (partnerTxt && this.stemMode && this.partnerName) partnerTxt = `<b>${esc(this.partnerName)}:</b> ` + partnerTxt;
         this.lyricsEl.innerHTML =
           `<div class="ly-partner">${partnerTxt ? '♪ ' + partnerTxt : '&nbsp;'}</div>` +
           `<div class="ly-cur">${syl(cur) || '&nbsp;'}</div>` +
           `<div class="ly-next">${next ? esc(next.text) : '&nbsp;'}</div>`;
         this._curSpans = this.lyricsEl.querySelectorAll('.ly-cur span');
       }
-      if (cur && this._curSpans) {
+      if (cur && this.stemMode && this._curSpans[0]) {
+        const p = Math.max(0, Math.min(1, (tt - cur.start) / Math.max(0.1, cur.end - cur.start)));
+        this._curSpans[0].style.setProperty('--p', (p * 100).toFixed(1) + '%');
+      } else if (cur && this._curSpans) {
         cur.notes.forEach((n, k) => {
           const el = this._curSpans[k];
           if (!el) return;
@@ -521,7 +650,7 @@
         h.interval.textContent = pn ? 'A outra voz está sozinha agora' : n ? 'Só você canta agora' : '';
       }
       const fb = this.feedback;
-      if (fb && performance.now() - fb.at < 900) {
+      if (fb && performance.now() - fb.at < (fb.long ? 2500 : 900)) {
         h.feedback.textContent = fb.text;
         h.feedback.className = 'feedback show ' + fb.cls;
       } else {

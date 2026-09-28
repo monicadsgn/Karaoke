@@ -21,7 +21,7 @@
     },
     deleteSong(id) {
       write(SONGS, this.songs().filter((s) => s.id !== id));
-      this.deleteAudio(id).catch(() => {});
+      for (const k of [id, id + ':inst', id + ':voc']) this.deleteAudio(k).catch(() => {});
     },
 
     prefs(songId) { return read(PREFS, {})[songId] || {}; },
